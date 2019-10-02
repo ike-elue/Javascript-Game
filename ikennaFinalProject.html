@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Tom's Defense</title>
+<script type="text/javascript">
+  var canvas;
+  var ctx;
+  var gameLoop;
+  var blankScreen;
+
+  var width, height;
+  var TITLE_SCREEN = 0, GAME_SCREEN = 1, LOSE_SCREEN = 2, HELP_SCREEN = 3;
+  var PLAYER_WIDTH = 15, PLAYER_HEIGHT = PLAYER_WIDTH;
+  var ENEMY_WIDTH = 20, ENEMY_HEIGHT = ENEMY_WIDTH;
+  var BASIC_ENEMY = 0, FAST_ENEMY = 1, FOLLOW_ENEMY = 2, SHOOT_ENEMY_H = 3, SHOOT_ENEMY_V = 4;
+  var UP = 0, DOWN = 1, RIGHT = 2, LEFT = 3;
+
+  var currentScreen = HELP_SCREEN;
+  var titleScreenObj = [], gameScreenObj = [], loseScreenObj = [], helpScreenObj = [], objList = [titleScreenObj, gameScreenObj, loseScreenObj, helpScreenObj];
+  var reset = true;
+  var elem = null;
+
+  var titleButton1Color = "green", titleButton2Color = "red";
+  var loseButton1Color = "blue";
+  var helpButton1Color = "green";
+
+  var player;
+  var playerX, playerY;
+
+  var enemyPointer;
+
+  var scoreDisplay, loseScoreDisplay;
+  var score = 0;
+  var scoreTimer = 0;
+  var SCORE_TIMER_LIMIT = 50;
+
+  var healthBarBox;
+  var healthBar;
+  var healthMax = 300;
+  var health = healthMax;
+  var healthLast = health;
+  var healthBarBoxHeight = 40;
+  var healthBarWidth;
+  var healthOffset = 10;
+
+  var enemyTimer = 0;
+  var ENEMY_TIMER_LIMIT = 240;
+
+  var fastEnemyTimer = 0;
+  var BASIC_TO_FAST = 1;
+
+  var followEnemyTimer = 0;
+  var FAST_TO_FOLLOW = 2;
+
+  var shootEnemyTimer = 0;
+  var FOLLOW_TO_SHOOT = 1;
+  var SHOOT_TIMER_LIMIT = 100;
+
+  var basicEnemySpeed = 2;
+  var basicEnemyDamage = 1;
+  var basicEnemyStats = [basicEnemySpeed, basicEnemySpeed, basicEnemyDamage, BASIC_ENEMY];
+  var basicEnemyColor = "blue";
+
+  var fastEnemySpeed = 6;
+  var fastEnemyDamage = 1;
+  var fastEnemyStats = [fastEnemySpeed, fastEnemySpeed, fastEnemyDamage, FAST_ENEMY];
+  var fastEnemyColor = "cyan";
+
+  var followEnemySpeed = 0.0025;
+  var followEnemyDamage = 2;
+  var followEnemyStats = [followEnemySpeed, followEnemySpeed, followEnemyDamage, FOLLOW_ENEMY];
+  var followEnemyColor = "orange";
+
+  var shootTimer = 0;
+  var shootEnemySpeed = 2;
+  var shootEnemyDamage = 0;
+  var horizontal = true;
+  var shootEnemyStats = [shootEnemySpeed, shootTimer, shootEnemyDamage, SHOOT_ENEMY_H];
+  var shootEnemyColor = "purple";
+  var pelletSpeed = 3;
+  var pelletDamage = 4;
+  var pelletStats = [pelletSpeed, UP, pelletDamage, -1, true];
+  var pelletColor = "gray";
+
+  var coin;
+  var COIN_SCORE = 50;
+  var coinScore = COIN_SCORE;
+  var coinCollected = false;
+  var coinIn = false;
+  var coinColor = "yellow";
+  window.onload = function() {
+      canvas = document.getElementById("screen");
+      ctx = canvas.getContext("2d");
+
+      var framesPerSecond = 60;
+      gameLoop = setInterval(draw, 1000/framesPerSecond);
+
+      canvas.addEventListener("click", clicked, false);
+      canvas.addEventListener("mousemove", playerMovement);
+      width = canvas.width;
+      height = canvas.height;
+      blankScreen = drawRectangle(0, 0, width, height, "darkgrey", true);
+  }
+
+  function clicked(e) {
+    if(currentScreen == GAME_SCREEN || currentScreen == -1)
+        return;
+
+    var rect = canvas.getBoundingClientRect();
+    var root = document.documentElement;
+    var mouseX = e.clientX - rect.left - root.scrollLeft;
+    var mouseY = e.clientY - rect.top - root.scrollTop;
+
+    for(var i = 0; i < objList[currentScreen].length; i++) {
+        if("width" in objList[currentScreen][i] && objList[currentScreen][i].x < mouseX && objList[currentScreen][i].y < mouseY && objList[currentScreen][i].x + objList[currentScreen][i].width > mouseX && objList[currentScreen][i].y + objList[currentScreen][i].height > mouseY)
+           elem = objList[currentScreen][i];
+    }
+    if(elem == null)
+      return;
+    if(currentScreen == TITLE_SCREEN) {
+      if(elem.color == titleButton1Color)
+          changeScreen(GAME_SCREEN);
+      else if(elem.color == titleButton2Color)
+          changeScreen(-1);
+    }
+    else if(currentScreen == LOSE_SCREEN) {
+      if(elem.color == loseButton1Color)
+          changeScreen(TITLE_SCREEN);
+    }
+    else if(currentScreen == HELP_SCREEN) {
+        if(elem.color == helpButton1Color)
+            changeScreen(TITLE_SCREEN);
+    }
+    elem = null;
+  }
+
+  function changeScreen(newScreen) {
+    clearScreen();
+    currentScreen = newScreen;
+    reset = true;
+  }
+
+  function clearScreen() {
+    if(currentScreen == GAME_SCREEN) {
+        while(gameScreenObj.length > enemyPointer)
+          gameScreenObj.pop();
+    }
+  }
+
+  function playerMovement(e) {
+    if(currentScreen != GAME_SCREEN)
+      return;
+
+    if(player == null)
+      return;
+
+    var rect = canvas.getBoundingClientRect();
+    var root = document.documentElement;
+    var mouseX = e.clientX - rect.left - root.scrollLeft;
+    var mouseY = e.clientY - rect.top - root.scrollTop;
+
+    player.x = mouseX - PLAYER_WIDTH/2
+    player.y = mouseY - PLAYER_HEIGHT/2;
+    if(player.x < 0)
+      player.x = 0;
+    if(player.width + player.x > width)
+      player.x = width - PLAYER_WIDTH;
+    if(player.y < healthBarBoxHeight)
+      player.y = healthBarBoxHeight;
+    if(player.height + player.y > height)
+      player.y = height - PLAYER_HEIGHT;
+    playerX = player.x;
+    playerY = player.y;
+  }
+
+  function draw() {
+    if(currentScreen == TITLE_SCREEN)
+      drawTitleScreen();
+    else if(currentScreen == GAME_SCREEN)
+      drawGameScreen();
+    else if(currentScreen == LOSE_SCREEN)
+      drawLoseScreen();
+    else if(currentScreen == HELP_SCREEN)
+      drawHelpScreen();
+    else {
+      drawExit();
+      clearInterval(gameLoop);
+    }
+  }
+
+  function drawExit() {
+    drawObject(blankScreen);
+    drawObject(drawText(width/2, height/2, "BYE!!", "black", true));
+  }
+
+  function drawHelpScreen() {
+    if(reset) {
+      initHelpScreen();
+      reset = false;
+    }
+    for(var i = 0; i < helpScreenObj.length; i++)
+        drawObject(helpScreenObj[i]);
+  }
+
+  function initHelpScreen() {
+    if(!(helpScreenObj.length > 0)) {
+      helpScreenObj.push(blankScreen);
+      var textHeight = 100;
+      helpScreenObj.push(drawText(width/2, textHeight, "This is a game. Click button to continue.", "black", true));
+      helpScreenObj.push(drawText(width/2, textHeight + 50, "Below info is for next pages.", "black", true)); 
+      helpScreenObj.push(drawText(width/2, textHeight + 100, "Click top button to go to game.", "black", true)); 
+      helpScreenObj.push(drawText(width/2, textHeight + 150, "Click bottom button to quit.", "black", true));
+      helpScreenObj.push(drawText(width/2, textHeight + 200, "Move cursor to move character once in game.", "black", true));
+      var buttonWidth = 100;
+      var buttonHeight = 50;
+      helpScreenObj.push(drawRectangle(width/2 - buttonWidth/2, height - buttonHeight - 10, buttonWidth, buttonHeight, helpButton1Color, true));
+    }
+  }
+    
+  function drawTitleScreen() {
+    if(reset) {
+      initTitleScreen();
+      reset = false;
+    }
+    for(var i = 0; i < titleScreenObj.length; i++)
+        drawObject(titleScreenObj[i]);
+  }
+
+  function initTitleScreen() {
+    if(!(titleScreenObj.length > 0)) {
+      titleScreenObj.push(blankScreen);
+      titleScreenObj.push(drawText(width/2, height/2 - 50, "Tom's Enemies", "black", true));
+      var titleButtonWidth = width/2;
+      var titleButtonHeight = 50;
+      var titleButtonX = width/2 - titleButtonWidth/2;
+      var titleButtonY = height/2 - titleButtonHeight/2;
+      var offset = 50;
+      titleScreenObj.push(drawRectangle(titleButtonX, titleButtonY + offset, titleButtonWidth, titleButtonHeight, titleButton1Color, true));
+      titleScreenObj.push(drawRectangle(titleButtonX, titleButtonY + titleButtonHeight + offset + 10 , titleButtonWidth, titleButtonHeight, titleButton2Color, true));
+    }
+  }
+
+  function drawGameScreen() {
+    if(reset) {
+      initGameScreen();
+      reset = false;
+    }
+    for(var i = 0; i < enemyPointer; i++)
+        drawObject(gameScreenObj[i]);
+    for(var i = enemyPointer; i < gameScreenObj.length; i += 2)
+        drawObject(gameScreenObj[i]);
+    checkCollisions();
+    updateEnemyMovement();
+    updateEnemySpawn();
+    updateScore();
+    updateHealth();
+  }
+
+  function initGameScreen() {
+    health = healthMax;
+    healthLast = health;
+    score = 0;
+    if(!(gameScreenObj.length > 0)) {
+      gameScreenObj.push(blankScreen);
+      player = drawRectangle(width/2 - PLAYER_WIDTH/2, height/2 - PLAYER_HEIGHT/2, PLAYER_WIDTH, PLAYER_HEIGHT, "black", true);
+      gameScreenObj.push(player);
+      scoreDisplay = drawText(width/2, height, "Score: 0", "black", true);
+      gameScreenObj.push(scoreDisplay);
+      healthBarBox = drawRectangle(0, 0, width, healthBarBoxHeight, "gray", true);
+      gameScreenObj.push(healthBarBox);
+      healthBar = drawRectangle(healthOffset, healthOffset, width - healthOffset * 2, healthBarBoxHeight - healthOffset * 2, "green", true);
+      healthBarWidth = healthBar.width;
+      gameScreenObj.push(healthBar);
+      coin = drawRectangle(randX(PLAYER_WIDTH), randY(PLAYER_HEIGHT), PLAYER_WIDTH, PLAYER_HEIGHT, "yellow", true);
+      gameScreenObj.push(coin);
+
+      enemyPointer = gameScreenObj.length;
+      gameScreenObj.push(createEnemy(basicEnemyColor));
+      gameScreenObj.push(basicEnemyStats.slice());
+    }
+    else {
+      gameScreenObj.push(createEnemy(basicEnemyColor));
+      gameScreenObj.push(basicEnemyStats.slice())
+    }
+  }
+
+  function updateEnemyMovement() {
+    for(var i = enemyPointer; i < gameScreenObj.length; i += 2) {
+      if(gameScreenObj[i + 1][3] == FAST_ENEMY || gameScreenObj[i + 1][3] == BASIC_ENEMY) {
+          gameScreenObj[i].x += gameScreenObj[i + 1][0];
+          gameScreenObj[i].y += gameScreenObj[i + 1][1];
+      }
+      if(gameScreenObj[i + 1][3] == FOLLOW_ENEMY) {
+          gameScreenObj[i].x += (playerX - gameScreenObj[i].x) * gameScreenObj[i + 1][0];
+          gameScreenObj[i].y += (playerY - gameScreenObj[i].y) * gameScreenObj[i + 1][1];
+      }
+      if(gameScreenObj[i + 1][3] == SHOOT_ENEMY_H || gameScreenObj[i + 1][3] == SHOOT_ENEMY_V){
+          gameScreenObj[i + 1][1]++;
+          if(gameScreenObj[i + 1][3] == SHOOT_ENEMY_H)
+               gameScreenObj[i].x += gameScreenObj[i + 1][0];
+          if(gameScreenObj[i + 1][3] == SHOOT_ENEMY_V)
+               gameScreenObj[i].y += gameScreenObj[i + 1][0];
+          if(gameScreenObj[i + 1][1] >= SHOOT_TIMER_LIMIT) {
+              gameScreenObj[i + 1][1] = 0;
+
+              pelletStats[1] = UP;
+              gameScreenObj.push(createPellet(gameScreenObj[i].x, gameScreenObj[i].y));
+              gameScreenObj.push(pelletStats.slice());
+
+              pelletStats[1] = DOWN;
+              gameScreenObj.push(createPellet(gameScreenObj[i].x, gameScreenObj[i].y));
+              gameScreenObj.push(pelletStats.slice());
+
+              pelletStats[1] = RIGHT;
+              gameScreenObj.push(createPellet(gameScreenObj[i].x, gameScreenObj[i].y));
+              gameScreenObj.push(pelletStats.slice());
+
+              pelletStats[1] = LEFT;
+              gameScreenObj.push(createPellet(gameScreenObj[i].x, gameScreenObj[i].y));
+              gameScreenObj.push(pelletStats.slice());
+          }
+      }
+      if(gameScreenObj[i + 1][3] == -1) {
+          if(gameScreenObj[i + 1][1] == UP)
+              gameScreenObj[i].y -= gameScreenObj[i + 1][0];
+          else if(gameScreenObj[i + 1][1] == DOWN)
+              gameScreenObj[i].y += gameScreenObj[i + 1][0];
+          else if(gameScreenObj[i + 1][1] == RIGHT)
+              gameScreenObj[i].x += gameScreenObj[i + 1][0];
+          else if(gameScreenObj[i + 1][1] == LEFT)
+              gameScreenObj[i].x -= gameScreenObj[i + 1][0];
+      }
+    }
+  }
+
+  function updateEnemySpawn() {
+    enemyTimer++;
+    if(enemyTimer >= ENEMY_TIMER_LIMIT) {
+      enemyTimer = 0;
+      if(fastEnemyTimer >= BASIC_TO_FAST) {
+          fastEnemyTimer = 0;
+          gameScreenObj.push(createEnemy(fastEnemyColor));
+          gameScreenObj.push(fastEnemyStats.slice());
+          followEnemyTimer++;
+      }
+      else if(followEnemyTimer >= FAST_TO_FOLLOW) {
+          followEnemyTimer = 0;
+          gameScreenObj.push(createEnemy(followEnemyColor));
+          gameScreenObj.push(followEnemyStats.slice());
+          shootEnemyTimer++;
+      }
+      else if(shootEnemyTimer >= FOLLOW_TO_SHOOT) {
+          shootEnemyTimer = 0;
+          gameScreenObj.push(createEnemy(shootEnemyColor));
+          if(Math.floor(Math.random() * 2) == 1)
+            shootEnemyStats[3] = SHOOT_ENEMY_H;
+          else
+            shootEnemyStats[3] = SHOOT_ENEMY_V;
+          gameScreenObj.push(shootEnemyStats.slice());
+      }
+      else {
+          gameScreenObj.push(createEnemy(basicEnemyColor));
+          gameScreenObj.push(basicEnemyStats.slice());
+          fastEnemyTimer++;
+      }
+      if(!coinIn) {
+          coinScore = COIN_SCORE;
+          coin.x = randX(PLAYER_WIDTH);
+          coin.y = randY(PLAYER_HEIGHT);
+          coin.shouldDraw = true;
+          coinIn = true;
+      }
+    }
+  }
+
+  function updateScore() {
+    if(coinCollected) {
+      score += coinScore;
+      coinCollected = false;
+      coinScore = 0;
+    }
+    scoreTimer++;
+    if(scoreTimer >= SCORE_TIMER_LIMIT) {
+      scoreTimer = 0;
+      score++;
+    }
+    scoreDisplay.label = "Score: " + score;
+  }
+
+  function updateHealth() {
+    if(health <= 0) {
+      health = 0;
+      healthBar.width = healthBarWidth;
+      resetTimers();
+      changeScreen(LOSE_SCREEN);
+      return;
+    }
+    if(health != healthLast) {
+      player.color = "red";
+      healthBar.width = (healthBarWidth * health)/healthMax;
+      healthLast = health;
+    }
+    else
+      player.color = "black";
+  }
+
+  function resetTimers() {
+    enemyTimer = 0;
+    fastEnemyTimer = 0;
+    followEnemyTimer = 0;
+    shootEnemyTimer = 0;
+    scoreTimer = 0;
+  }
+
+  function randX(offset) {
+    return Math.floor(Math.random() * (width - offset));
+  }
+
+  function randY(offset) {
+    return Math.floor(Math.random() * (height - offset - healthBarBoxHeight)) + healthBarBoxHeight;
+  }
+
+  function createEnemy(color) {
+    return drawRectangle(randX(ENEMY_WIDTH), randY(ENEMY_HEIGHT), ENEMY_WIDTH, ENEMY_HEIGHT, color, true);
+  }
+
+  function createPellet(x, y) {
+    return drawRectangle(x, y, PLAYER_WIDTH, PLAYER_HEIGHT, pelletColor, true);
+  }
+
+  function drawLoseScreen() {
+    if(reset) {
+      initLoseScreen();
+      reset = false;
+    }
+    for(var i = 0; i < loseScreenObj.length; i++)
+        drawObject(loseScreenObj[i]);
+  }
+
+  function initLoseScreen() {
+    if(!(loseScreenObj.length > 0)) {
+      loseScreenObj.push(blankScreen);
+      loseScreenObj.push(drawText(width/2, height/2, "You Lost :(", "black", true));
+      loseScoreDisplay = drawText(width/2, height/2 + 40, "" + score, "black", true);
+      loseScreenObj.push(loseScoreDisplay);
+      var buttonWidth = 200;
+      loseScreenObj.push(drawRectangle(width/2 - buttonWidth/2, height/2 + 100, buttonWidth, 50, loseButton1Color, true));
+    }
+    loseScoreDisplay.label = "Final Score: " + score;
+  }
+
+  function checkCollisions() {
+    // Damage
+    for(var i = enemyPointer; i < gameScreenObj.length; i += 2) {
+      if (player.x < gameScreenObj[i].x + gameScreenObj[i].width &&
+         player.x + player.width > gameScreenObj[i].x &&
+         player.y < gameScreenObj[i].y + gameScreenObj[i].height &&
+         player.y + player.height > gameScreenObj[i].y) {
+             health -= gameScreenObj[i + 1][2];
+      }
+    }
+
+    // Coin
+    if (player.x < coin.x + coin.width &&
+         player.x + player.width > coin.x &&
+         player.y < coin.y + coin.height &&
+         player.y + player.height > coin.y) {
+             coin.shouldDraw = false;
+             coinIn = false;
+             coinCollected = true;
+    }
+
+    // Movement
+    for(var i = enemyPointer; i < gameScreenObj.length; i += 2) {
+      if(gameScreenObj[i + 1][3] == FAST_ENEMY || gameScreenObj[i + 1][3] == BASIC_ENEMY) {
+          if(gameScreenObj[i].x < 0 || gameScreenObj[i].width + gameScreenObj[i].x > width)
+              gameScreenObj[i + 1][0] = -gameScreenObj[i + 1][0];
+          if(gameScreenObj[i].y < healthBarBoxHeight || gameScreenObj[i].height + gameScreenObj[i].y > height)
+              gameScreenObj[i + 1][1] = -gameScreenObj[i + 1][1];
+      }
+      if(gameScreenObj[i + 1][3] == SHOOT_ENEMY_H) {
+              if(gameScreenObj[i].x < 0 || gameScreenObj[i].width + gameScreenObj[i].x > width)
+                  gameScreenObj[i + 1][0] = -gameScreenObj[i + 1][0];
+      }
+      if(gameScreenObj[i + 1][3] == SHOOT_ENEMY_V) {
+              if(gameScreenObj[i].y < healthBarBoxHeight || gameScreenObj[i].height + gameScreenObj[i].y > height)
+                  gameScreenObj[i + 1][0] = -gameScreenObj[i + 1][0];
+      }
+      if(gameScreenObj[i + 1][3] == -1) {
+          if(gameScreenObj[i].x < 0 || gameScreenObj[i].width + gameScreenObj[i].x > width || gameScreenObj[i].y < healthBarBoxHeight || gameScreenObj[i].height + gameScreenObj[i].y > height)
+              gameScreenObj[i].shouldDraw = false;
+      }
+    }
+  }
+
+  function drawObject(gameObject) {
+    if(!gameObject.shouldDraw)
+      return;
+    // Draws From Middle
+    if("label" in gameObject) {
+        ctx.font = "30px Arial";
+        ctx.fillStyle = gameObject.color;
+        ctx.fillText(gameObject.label, gameObject.x - ctx.measureText(gameObject.label).width/2, gameObject.y);
+    }
+
+    // Draws From Top Left
+    else if("width" in gameObject) {
+        ctx.fillStyle = gameObject.color;
+        ctx.fillRect(gameObject.x, gameObject.y, gameObject.width, gameObject.height);
+    }
+
+  }
+
+  function drawText(x, y, label, color, shouldDraw) {
+    return {x: x, y: y, label: label, color: color, shouldDraw: true};
+  }
+
+  function drawRectangle(x, y, width, height, color, shouldDraw) {
+    return {x: x, y: y, width: width, height: height, color: color, shouldDraw: true};
+  }
+
+</script>
+
+<style type="text/css">
+    #screen{
+        margin:50px auto;
+        background:#eee;
+    }
+</style>
+</head>
+<body>
+    <canvas id="screen" height="480" width="640"></canvas>
+</body>
+</html>
